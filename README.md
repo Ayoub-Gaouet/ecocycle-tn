@@ -1,34 +1,44 @@
-# ecocycle-tn
+# EcoCycle TN
 
-EcoCycle TN - Plateforme d'economie circulaire (Spring Boot + DevOps).
+EcoCycle TN is a Spring Boot service for a circular-economy recycling platform.
+It currently contains user authentication, authenticated profile management, and
+recyclable item announcements.
 
-## EC-2 - Inscription et authentification des utilisateurs
+## Features
 
-Implemented endpoints:
+- `POST /api/auth/register`: register a user with BCrypt password hashing
+- `POST /api/auth/login`: authenticate and receive a JWT bearer token
+- `GET /api/users/me`: read the authenticated user profile
+- `PUT /api/users/me`: update editable profile fields
+- `POST /api/items`: create a recyclable item announcement
+- `GET /api/items`: list announcements
+- `GET /api/items?category=PLASTIC`: filter announcements by category
+- `GET /api/items/{id}`: read announcement details
+- `PUT /api/items/{id}`: update an owned announcement
+- `DELETE /api/items/{id}`: delete an owned announcement
 
-- `POST /api/auth/register`
-- `POST /api/auth/login`
+## Stack
 
-The auth flow includes:
+- Java 17 source compatibility
+- Spring Boot 3.5.13
+- Spring Security with stateless JWT authentication
+- Spring Data JPA
+- MariaDB
+- Docker and Docker Compose
+- Spring Boot Actuator
 
-- email and password validation
-- BCrypt password hashing
-- duplicate email rejection with HTTP 400
-- invalid login rejection with HTTP 401
-- JWT HS256 token generation with a one-hour expiration
-- JWT claims: `sub` email and `role`
-- stateless Spring Security with a JWT filter
+## Local Development
 
-## Database
+Run tests:
 
-The application uses MariaDB. By default the JDBC URL creates the database if
-the configured user has `CREATE` privileges.
+```bash
+./mvnw test
+```
 
-If your MariaDB user cannot create databases, create it manually before
-starting the app:
+Run the application locally with MariaDB already available:
 
-```sql
-CREATE DATABASE ecocycle_tn CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```bash
+./mvnw spring-boot:run
 ```
 
 Default datasource values:
@@ -37,16 +47,66 @@ Default datasource values:
 - `DB_USERNAME=root`
 - `DB_PASSWORD=`
 
-Run locally:
+If your MariaDB user cannot create databases automatically, create it manually:
 
-```bash
-./mvnw spring-boot:run
+```sql
+CREATE DATABASE ecocycle_tn CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-Run tests:
+For production-like runs, set `JWT_SECRET` to a secret with at least 32 bytes of
+entropy.
+
+## Docker
+
+Build the image:
 
 ```bash
-./mvnw test
+docker build -t ecocycle/user-service:1.0.0 .
 ```
 
-For production, set `JWT_SECRET` to a secret with at least 32 bytes of entropy.
+Run only the application container, using a MariaDB instance reachable from the
+container:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e DB_URL="jdbc:mariadb://host.docker.internal:3306/ecocycle_tn?createDatabaseIfNotExist=true" \
+  -e DB_USERNAME=root \
+  -e DB_PASSWORD= \
+  -e JWT_SECRET="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" \
+  ecocycle/user-service:1.0.0
+```
+
+Run the complete stack with MariaDB:
+
+```bash
+docker compose up --build
+```
+
+The Compose database is available to the host on `localhost:3307` to avoid
+conflicts with a local MariaDB server already listening on `3306`.
+
+Stop and remove containers:
+
+```bash
+docker compose down
+```
+
+Remove the MariaDB volume when you need a fresh database:
+
+```bash
+docker compose down -v
+```
+
+## Health Checks
+
+Actuator endpoints exposed for container and orchestration health checks:
+
+- `GET /actuator/health`
+- `GET /actuator/health/liveness`
+- `GET /actuator/health/readiness`
+
+Check the running service:
+
+```bash
+curl http://localhost:8080/actuator/health
+```
