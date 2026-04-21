@@ -26,6 +26,13 @@ public class User {
     @Column(nullable = false)
     private String fullName;
 
+    private String phone;
+
+    private String governorate;
+
+    @Column(nullable = false)
+    private int ecoPoints;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
@@ -34,9 +41,24 @@ public class User {
     }
 
     public User(String email, String password, String fullName, Role role) {
+        this(email, password, fullName, null, null, 0, role);
+    }
+
+    public User(
+            String email,
+            String password,
+            String fullName,
+            String phone,
+            String governorate,
+            int ecoPoints,
+            Role role
+    ) {
         this.email = email;
         this.password = password;
         this.fullName = fullName;
+        this.phone = phone;
+        this.governorate = governorate;
+        this.ecoPoints = ecoPoints;
         this.role = role;
     }
 
@@ -56,7 +78,25 @@ public class User {
         return fullName;
     }
 
+    public String getPhone() {
+        return phone;
+    }
+
+    public String getGovernorate() {
+        return governorate;
+    }
+
+    public int getEcoPoints() {
+        return ecoPoints;
+    }
+
     public Role getRole() {
         return role;
+    }
+
+    public void updateProfile(String fullName, String phone, String governorate) {
+        this.fullName = fullName;
+        this.phone = phone;
+        this.governorate = governorate;
     }
 }

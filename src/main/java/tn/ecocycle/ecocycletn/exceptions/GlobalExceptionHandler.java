@@ -7,8 +7,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import tn.ecocycle.ecocycletn.exceptions.EmailAlreadyUsedException;
-import tn.ecocycle.ecocycletn.exceptions.InvalidCredentialsException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -25,6 +23,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(ApiError.of(401, "Unauthorized", exception.getMessage()));
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiError> handleResourceNotFound(ResourceNotFoundException exception) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ApiError.of(404, "Not Found", exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
