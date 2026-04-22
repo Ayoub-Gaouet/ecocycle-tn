@@ -97,6 +97,30 @@ Remove the MariaDB volume when you need a fresh database:
 docker compose down -v
 ```
 
+## Continuous Integration
+
+GitHub Actions runs the CI workflow on pull requests to `dev` or `main`, and on
+pushes to `main`, `dev`, `feat/**`, `bugfix/**`, `hotfix/**`, and `EC-*`
+branches.
+
+The pipeline runs:
+
+- Maven `clean verify` with JaCoCo coverage
+- SonarCloud analysis with quality gate enforcement
+- dependency tree export as a CI artifact
+- Docker Buildx build from the shared JAR artifact
+- GHCR push on non-PR events
+
+Published GHCR tags are the short commit SHA, the sanitized branch name, and
+`latest` for pushes to `dev` or `main`.
+
+Required GitHub secret:
+
+- `SONAR_TOKEN`: SonarCloud token used by the quality gate
+
+The default `GITHUB_TOKEN` is used for GHCR publishing, with workflow package
+write permissions.
+
 ## Health Checks
 
 Actuator endpoints exposed for container and orchestration health checks:
