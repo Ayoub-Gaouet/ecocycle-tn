@@ -124,6 +124,11 @@ Optional GitHub secret:
 
 - `NVD_API_KEY`: NVD API key used to make OWASP Dependency Check faster and more stable
 
+`NVD_API_KEY` is strongly recommended in GitHub Actions because public runners
+can be rate-limited by the NVD API. The workflow reads it through
+`nvdApiKeyEnvironmentVariable` so the key is not passed directly on the Maven
+command line.
+
 The default `GITHUB_TOKEN` is used for GHCR publishing, with workflow package
 write permissions and SARIF upload permissions.
 
