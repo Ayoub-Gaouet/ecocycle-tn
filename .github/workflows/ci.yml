@@ -113,7 +113,7 @@ jobs:
           args=(
             "-DskipTests"
             "org.owasp:dependency-check-maven:${DEPENDENCY_CHECK_VERSION}:check"
-            "-Dformat=HTML,JSON,SARIF"
+            "-Dformat=ALL"
             "-DfailBuildOnCVSS=7"
             "-DdataDirectory=${GITHUB_WORKSPACE}/.dependency-check-data"
             "-DnvdApiDelay=10000"
