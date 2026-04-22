@@ -106,9 +106,11 @@ branches.
 The pipeline runs:
 
 - Maven `clean verify` with JaCoCo coverage
-- SonarCloud analysis with quality gate enforcement
+- SonarCloud analysis with pull request quality gate feedback
+- OWASP Dependency Check with HTML, JSON, and SARIF reports
 - dependency tree export as a CI artifact
 - Docker Buildx build from the shared JAR artifact
+- Trivy image scan with SARIF upload
 - GHCR push on non-PR events
 
 Published GHCR tags are the short commit SHA, the sanitized branch name, and
@@ -118,8 +120,30 @@ Required GitHub secret:
 
 - `SONAR_TOKEN`: SonarCloud token used by the quality gate
 
+Optional GitHub secret:
+
+- `NVD_API_KEY`: NVD API key used to make OWASP Dependency Check faster and more stable
+
+`NVD_API_KEY` is strongly recommended in GitHub Actions because public runners
+can be rate-limited by the NVD API. The workflow reads it through
+`nvdApiKeyEnvironmentVariable` so the key is not passed directly on the Maven
+command line.
+
 The default `GITHUB_TOKEN` is used for GHCR publishing, with workflow package
-write permissions.
+write permissions and SARIF upload permissions.
+
+## DevSecOps
+
+The CI pipeline fails when a security scanner finds a high-risk issue:
+
+- OWASP Dependency Check fails the build for dependencies with CVSS `>= 7`.
+- Trivy fails the build for Docker image vulnerabilities with severity `HIGH` or `CRITICAL`.
+
+Security reports are uploaded as workflow artifacts. SARIF reports are also sent
+to GitHub Code Scanning when the repository permissions allow it.
+
+Accepted Trivy exceptions must be documented in `.trivyignore`, one CVE per
+line, after risk acceptance.
 
 ## Health Checks
 
