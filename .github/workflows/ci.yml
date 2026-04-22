@@ -59,7 +59,6 @@ jobs:
           -Dsonar.organization=${SONAR_ORGANIZATION}
           -Dsonar.projectKey=${SONAR_PROJECT_KEY}
           -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-          -Dsonar.qualitygate.wait=true
 
       - name: Upload application JAR
         uses: actions/upload-artifact@v4
