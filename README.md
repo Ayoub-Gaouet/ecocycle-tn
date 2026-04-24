@@ -112,13 +112,16 @@ The pipeline runs:
 - Docker Buildx build from the shared JAR artifact
 - Trivy image scan with SARIF upload
 - GHCR push on non-PR events
+- GitOps manifest image tag updates on `dev` and `main` pushes
 
 Published GHCR tags are the short commit SHA, the sanitized branch name, and
 `latest` for pushes to `dev` or `main`.
 
-Required GitHub secret:
+Required GitHub secrets:
 
 - `SONAR_TOKEN`: SonarCloud token used by the quality gate
+- `GITOPS_PAT`: fine-grained token with contents write access to
+  `Ayoub-Gaouet/ecocycle-tn-gitops`
 
 Optional GitHub secret:
 
@@ -131,6 +134,35 @@ command line.
 
 The default `GITHUB_TOKEN` is used for GHCR publishing, with workflow package
 write permissions and SARIF upload permissions.
+
+## GitOps Deployment
+
+The deployment source of truth is the separate GitOps repository:
+
+- `Ayoub-Gaouet/ecocycle-tn-gitops`
+- ArgoCD application: `ecocycle-user-service`
+- Kubernetes namespace: `ecocycle`
+- Manifest path: `k8s/`
+
+After a successful non-PR CI run on `dev` or `main`, the `update-gitops` job
+checks out the GitOps repository, updates the image tag in
+`k8s/kustomization.yaml` with `yq`, commits the change, and pushes it to
+`main`. ArgoCD then detects the Git change and reconciles the cluster.
+
+Initial local setup is intentionally manual only once. After cloning
+`Ayoub-Gaouet/ecocycle-tn-gitops`, run these commands from the GitOps
+repository root:
+
+```bash
+minikube start --cpus=4 --memory=8192
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -f argocd/ecocycle-user-service-application.yaml
+```
+
+After the ArgoCD application is created, deployment changes should flow through
+Git and the CI `update-gitops` job rather than repeated manual `kubectl apply`
+commands.
 
 ## DevSecOps
 
