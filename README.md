@@ -164,6 +164,132 @@ After the ArgoCD application is created, deployment changes should flow through
 Git and the CI `update-gitops` job rather than repeated manual `kubectl apply`
 commands.
 
+## Execution Commands and Capture Checklist
+
+Use this checklist to reproduce the project demo and prepare screenshots for the
+Notion report.
+
+### 1. Repository and branch state
+
+```bash
+git status --short --branch
+git log --oneline --decorate -n 5
+git branch -vv
+```
+
+Capture to add:
+
+- Backend branch `EC-8-Deployement-continu-GitOps-avec-ArgoCD` tracking origin.
+- Latest backend commit `feat(EC-8): wire GitOps deployment handoff`.
+- GitOps branch pushed with commit `feat(EC-8): add ArgoCD GitOps manifests`.
+
+### 2. Maven tests
+
+Windows:
+
+```powershell
+.\mvnw.cmd "-Dmaven.repo.local=.m2/repository" test
+```
+
+Linux/macOS:
+
+```bash
+./mvnw test
+```
+
+Capture to add:
+
+- Maven `BUILD SUCCESS`.
+- Summary `Tests run: 31, Failures: 0, Errors: 0, Skipped: 0`.
+
+### 3. Docker build and local execution
+
+Build the application image:
+
+```bash
+docker build -t ecocycle/user-service:1.0.0 .
+```
+
+Run the complete local stack:
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/actuator/health/liveness
+curl http://localhost:8080/actuator/health/readiness
+```
+
+Inspect logs and stop the stack:
+
+```bash
+docker compose logs app --tail=80
+docker compose logs mariadb --tail=80
+docker compose down
+```
+
+Capture to add:
+
+- Successful `docker build`.
+- `docker compose ps` showing MariaDB and the app healthy.
+- `/actuator/health` response with status `UP`.
+- Docker Desktop or terminal showing the running containers.
+
+### 4. CI, quality and DevSecOps
+
+Useful commands before opening the pull request:
+
+```bash
+git diff --check
+git status --short --branch
+git push -u origin EC-8-Deployement-continu-GitOps-avec-ArgoCD
+```
+
+Evidence to capture from GitHub:
+
+- GitHub Actions workflow with jobs `build-test-sonar`, `dependency-check`,
+  `docker-build-scan-push`, and `update-gitops`.
+- SonarCloud Quality Gate passed.
+- OWASP Dependency Check report artifact.
+- Trivy SARIF/report artifact.
+- GHCR image tags generated from the branch or short SHA.
+
+### 5. GitOps and ArgoCD
+
+Validate the GitOps manifests locally:
+
+```bash
+cd ../ecocycle-tn-gitops
+kubectl kustomize k8s
+git status --short --branch
+```
+
+Initial ArgoCD setup:
+
+```bash
+minikube start --cpus=4 --memory=8192
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -f argocd/ecocycle-user-service-application.yaml
+```
+
+Follow the deployment:
+
+```bash
+kubectl -n argocd get applications
+kubectl -n ecocycle get pods,svc,ingress
+kubectl -n ecocycle rollout status deployment/ecocycle-user-service
+kubectl -n ecocycle port-forward svc/ecocycle-user-service 8080:80
+curl http://localhost:8080/actuator/health
+```
+
+Capture to add:
+
+- ArgoCD application `ecocycle-user-service`.
+- ArgoCD status moving from `OutOfSync` to `Syncing` to `Synced`.
+- Kubernetes pods and services in namespace `ecocycle`.
+- Updated image tag in `ecocycle-tn-gitops/k8s/kustomization.yaml`.
+
 ## DevSecOps
 
 The CI pipeline fails when a security scanner finds a high-risk issue:
