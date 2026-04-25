@@ -30,6 +30,7 @@
 		<java.version>17</java.version>
 		<jjwt.version>0.12.6</jjwt.version>
 		<jacoco.version>0.8.13</jacoco.version>
+		<spring-security.version>6.5.10</spring-security.version>
 		<tomcat.version>10.1.54</tomcat.version>
 		<log4j2.version>2.25.4</log4j2.version>
 	</properties>
