@@ -307,16 +307,20 @@ jobs:
       GITOPS_BRANCH: main
 
     steps:
-      - name: Ensure GitOps token is configured
+      - name: Check GitOps token
+        id: gitops_token
         env:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
         run: |
           if [[ -z "${GITOPS_PAT}" ]]; then
-            echo "::error::GITOPS_PAT is required to update ${GITOPS_REPOSITORY}."
-            exit 1
+            echo "::warning::GITOPS_PAT is not configured. Skipping GitOps repository update."
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Compute GitOps image metadata
+        if: steps.gitops_token.outputs.configured == 'true'
         id: gitops_meta
         shell: bash
         run: |
@@ -329,6 +333,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout GitOps repository
+        if: steps.gitops_token.outputs.configured == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.GITOPS_REPOSITORY }}
@@ -338,6 +343,7 @@ jobs:
           fetch-depth: 0
 
       - name: Update user-service image tag
+        if: steps.gitops_token.outputs.configured == 'true'
         uses: mikefarah/yq@v4.45.1
         env:
           IMAGE_NAME: ${{ steps.gitops_meta.outputs.image }}
@@ -348,6 +354,7 @@ jobs:
             yq -i '(.images[] | select(.name == strenv(IMAGE_NAME)).newTag) = strenv(IMAGE_TAG)' gitops/k8s/kustomization.yaml
 
       - name: Commit and push GitOps update
+        if: steps.gitops_token.outputs.configured == 'true'
         working-directory: gitops
         shell: bash
         run: |
