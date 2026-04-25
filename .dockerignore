@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.m2
+target
+*.iml
+*.log
+README.md
+HELP.md
+LICENSE
+.gitignore
+.gitattributes

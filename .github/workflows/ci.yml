@@ -1,0 +1,363 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "feat/**"
+      - "bugfix/**"
+      - "hotfix/**"
+      - "EC-*"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: read
+  security-events: write
+
+env:
+  JAVA_VERSION: "17"
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ecocycle-tn
+  SONAR_HOST_URL: https://sonarcloud.io
+  SONAR_ORGANIZATION: ayoub-gaouet
+  SONAR_PROJECT_KEY: Ayoub-Gaouet_ecocycle-tn
+  DEPENDENCY_CHECK_VERSION: "12.2.1"
+
+jobs:
+  build-test-sonar:
+    name: Build, test and SonarCloud
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x mvnw
+
+      - name: Build, test and analyze
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: >
+          ./mvnw -B clean verify
+          org.sonarsource.scanner.maven:sonar-maven-plugin:5.6.0.6792:sonar
+          -Dsonar.token=${SONAR_TOKEN}
+          -Dsonar.host.url=${SONAR_HOST_URL}
+          -Dsonar.organization=${SONAR_ORGANIZATION}
+          -Dsonar.projectKey=${SONAR_PROJECT_KEY}
+          -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+
+      - name: Upload application JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecocycle-tn-jar
+          path: target/app.jar
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload JaCoCo coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/jacoco.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  dependency-check:
+    name: OWASP Dependency Check
+    runs-on: ubuntu-latest
+    needs: build-test-sonar
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x mvnw
+
+      - name: Cache OWASP Dependency Check data
+        uses: actions/cache@v4
+        with:
+          path: .dependency-check-data
+          key: ${{ runner.os }}-dependency-check-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-dependency-check-
+
+      - name: Run OWASP Dependency Check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          mkdir -p target .dependency-check-data
+          args=(
+            "-DskipTests"
+            "org.owasp:dependency-check-maven:${DEPENDENCY_CHECK_VERSION}:check"
+            "-Dformat=ALL"
+            "-DfailBuildOnCVSS=7"
+            "-DdataDirectory=${GITHUB_WORKSPACE}/.dependency-check-data"
+            "-DnvdApiDelay=10000"
+            "-DnvdMaxRetryCount=20"
+            "-DnvdValidForHours=24"
+          )
+
+          if [[ -n "${NVD_API_KEY}" ]]; then
+            args+=("-DnvdApiKeyEnvironmentVariable=NVD_API_KEY")
+            args+=("-DnvdApiDelay=6000")
+          else
+            echo "::warning::NVD_API_KEY is not configured. Dependency Check may be rate-limited by NVD."
+          fi
+
+          ./mvnw -B "${args[@]}"
+
+      - name: Generate dependency tree
+        if: always()
+        run: |
+          mkdir -p target
+          ./mvnw -B -DskipTests dependency:tree -DoutputFile=target/dependency-tree.txt
+
+      - name: Upload OWASP Dependency Check SARIF
+        if: always() && hashFiles('target/dependency-check-report.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: target/dependency-check-report.sarif
+          category: owasp-dependency-check
+
+      - name: Upload OWASP Dependency Check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-dependency-check-reports
+          path: target/dependency-check-report.*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload dependency tree
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-tree
+          path: target/dependency-tree.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  docker-build-scan-push:
+    name: Docker build and GHCR push
+    runs-on: ubuntu-latest
+    needs: dependency-check
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download application JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecocycle-tn-jar
+          path: target
+
+      - name: Prepare Docker runtime context
+        shell: bash
+        run: |
+          mkdir -p docker-context
+          cp target/app.jar docker-context/app.jar
+          cat > docker-context/Dockerfile <<'EOF'
+          FROM eclipse-temurin:21-jre-alpine
+
+          RUN addgroup -S spring && adduser -S spring -G spring
+
+          WORKDIR /app
+          COPY app.jar /app/app.jar
+          RUN chown -R spring:spring /app
+
+          USER spring:spring
+          EXPOSE 8080
+
+          ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+
+          HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+            CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+
+          ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/app.jar"]
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare Docker metadata
+        id: docker_meta
+        shell: bash
+        run: |
+          image_name="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          ref_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          safe_ref="$(echo "${ref_name}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g')"
+          short_sha="${GITHUB_SHA::7}"
+
+          {
+            echo "image=${image_name}"
+            echo "short_sha=${short_sha}"
+            echo "safe_ref=${safe_ref}"
+            echo "primary_tag=${image_name}:${short_sha}"
+            echo "tags<<EOF"
+            echo "${image_name}:${short_sha}"
+            echo "${image_name}:${safe_ref}"
+            if [[ "${GITHUB_REF_NAME}" == "dev" || "${GITHUB_REF_NAME}" == "main" ]]; then
+              echo "${image_name}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build image for security scan
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          file: docker-context/Dockerfile
+          load: true
+          tags: ${{ steps.docker_meta.outputs.primary_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate Trivy SARIF report
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.docker_meta.outputs.primary_tag }}
+          format: sarif
+          output: trivy-results.sarif
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
+
+      - name: Upload Trivy report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-results.sarif
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Fail on HIGH or CRITICAL image vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.docker_meta.outputs.primary_tag }}
+          format: table
+          exit-code: "1"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          skip-setup-trivy: true
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          file: docker-context/Dockerfile
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  update-gitops:
+    name: Update GitOps manifests
+    runs-on: ubuntu-latest
+    needs: docker-build-scan-push
+    if: github.event_name != 'pull_request' && (github.ref_name == 'dev' || github.ref_name == 'main')
+    env:
+      GITOPS_REPOSITORY: Ayoub-Gaouet/ecocycle-tn-gitops
+      GITOPS_BRANCH: main
+
+    steps:
+      - name: Ensure GitOps token is configured
+        env:
+          GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+        run: |
+          if [[ -z "${GITOPS_PAT}" ]]; then
+            echo "::error::GITOPS_PAT is required to update ${GITOPS_REPOSITORY}."
+            exit 1
+          fi
+
+      - name: Compute GitOps image metadata
+        id: gitops_meta
+        shell: bash
+        run: |
+          image_name="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          short_sha="${GITHUB_SHA::7}"
+
+          {
+            echo "image=${image_name}"
+            echo "short_sha=${short_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
+          ref: ${{ env.GITOPS_BRANCH }}
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+          fetch-depth: 0
+
+      - name: Update user-service image tag
+        uses: mikefarah/yq@v4.45.1
+        env:
+          IMAGE_NAME: ${{ steps.gitops_meta.outputs.image }}
+          IMAGE_TAG: ${{ steps.gitops_meta.outputs.short_sha }}
+        with:
+          cmd: |
+            yq -e '.images[] | select(.name == strenv(IMAGE_NAME))' gitops/k8s/kustomization.yaml
+            yq -i '(.images[] | select(.name == strenv(IMAGE_NAME)).newTag) = strenv(IMAGE_TAG)' gitops/k8s/kustomization.yaml
+
+      - name: Commit and push GitOps update
+        working-directory: gitops
+        shell: bash
+        run: |
+          if git diff --quiet -- k8s/kustomization.yaml; then
+            echo "GitOps image tag already points to ${{ steps.gitops_meta.outputs.short_sha }}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/kustomization.yaml
+          git commit -m "chore(EC-8): deploy ecocycle-tn ${{ steps.gitops_meta.outputs.short_sha }}"
+          git push origin "HEAD:${GITOPS_BRANCH}"
